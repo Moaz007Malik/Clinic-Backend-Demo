@@ -4,6 +4,7 @@ import { adminQuery, adminTx } from '../db.js';
 import { asyncRoute, HttpError, assertPasswordPolicy, slugify } from '../http.js';
 import {
   buildTotp,
+  forgetAuth,
   hashPassword,
   newMfaSecret,
   openSession,
@@ -157,39 +158,49 @@ router.post('/auth/onboard', loginLimit, asyncRoute(async (req, res) => {
 }));
 
 router.post('/auth/logout', requireAuth, asyncRoute(async (req, res) => {
+  const header = req.get('authorization') || '';
+  forgetAuth(header.startsWith('Bearer ') ? header.slice(7) : '');
   await adminQuery(`UPDATE sessions SET revoked_at = now() WHERE id = $1`, [req.user.sessionId]);
   res.json({ ok: true });
 }));
 
 router.get('/auth/me', requireAuth, asyncRoute(async (req, res) => {
-  const clinics = req.user.isSuper
-    ? []
-    : (await adminQuery(
-      `SELECT id, name, code, city, is_primary, status, phone, address FROM clinics
-       WHERE organization_id = $1 AND ($2::boolean OR id = ANY($3::uuid[]))
-       ORDER BY is_primary DESC, name`,
-      [req.user.organizationId, req.user.allClinics, req.user.clinicIds]
-    )).rows;
-
+  let clinics = [];
   let subscription = null;
-  if (req.user.organizationId) {
-    const sub = await adminQuery(
-      `SELECT s.*, p.key AS plan_key, p.name AS plan_name, p.price_monthly, p.price_yearly,
-              p.max_users, p.max_patients, p.max_branches, p.max_storage_mb, p.sms_quota, p.whatsapp_quota, p.features
-       FROM subscriptions s JOIN subscription_plans p ON p.id = s.plan_id
-       WHERE s.organization_id = $1`,
-      [req.user.organizationId]
+  let unread = 0;
+  if (!req.user.isSuper && req.user.organizationId) {
+    const { rows } = await adminQuery(
+      `SELECT
+         COALESCE((
+           SELECT json_agg(json_build_object(
+             'id', c.id, 'name', c.name, 'code', c.code, 'city', c.city,
+             'is_primary', c.is_primary, 'status', c.status, 'phone', c.phone, 'address', c.address
+           ) ORDER BY c.is_primary DESC, c.name)
+           FROM clinics c
+           WHERE c.organization_id = $1 AND ($2::boolean OR c.id = ANY($3::uuid[]))
+         ), '[]'::json) AS clinics,
+         (
+           SELECT json_build_object(
+             'id', s.id, 'organization_id', s.organization_id, 'plan_id', s.plan_id, 'status', s.status,
+             'billing_cycle', s.billing_cycle, 'trial_ends_at', s.trial_ends_at, 'current_period_end', s.current_period_end,
+             'plan_key', p.key, 'plan_name', p.name, 'price_monthly', p.price_monthly, 'price_yearly', p.price_yearly,
+             'max_users', p.max_users, 'max_patients', p.max_patients, 'max_branches', p.max_branches,
+             'max_storage_mb', p.max_storage_mb, 'sms_quota', p.sms_quota, 'whatsapp_quota', p.whatsapp_quota, 'features', p.features
+           )
+           FROM subscriptions s JOIN subscription_plans p ON p.id = s.plan_id
+           WHERE s.organization_id = $1
+         ) AS subscription,
+         (
+           SELECT count(*)::int FROM notifications
+           WHERE organization_id = $1 AND channel = 'in_app' AND read_at IS NULL
+             AND (user_id = $4 OR ($5::uuid IS NOT NULL AND patient_id = $5))
+         ) AS unread`,
+      [req.user.organizationId, req.user.allClinics, req.user.clinicIds, req.user.id, req.user.patientId]
     );
-    subscription = sub.rows[0] || null;
+    clinics = rows[0]?.clinics || [];
+    subscription = rows[0]?.subscription || null;
+    unread = rows[0]?.unread || 0;
   }
-  const unread = req.user.organizationId
-    ? (await adminQuery(
-      `SELECT count(*)::int AS n FROM notifications
-       WHERE organization_id = $1 AND channel = 'in_app' AND read_at IS NULL
-         AND (user_id = $2 OR ($3::uuid IS NOT NULL AND patient_id = $3))`,
-      [req.user.organizationId, req.user.id, req.user.patientId]
-    )).rows[0].n
-    : 0;
 
   res.json({
     user: {

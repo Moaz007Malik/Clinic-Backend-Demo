@@ -5,6 +5,12 @@ import { adminQuery } from './db.js';
 import { HttpError } from './http.js';
 
 const SESSION_HOURS = 8;
+const authCache = new Map();
+const AUTH_TTL_MS = 20000;
+
+export function forgetAuth(token) {
+  if (token) authCache.delete(hashToken(token));
+}
 
 export function hashToken(token) {
   return createHash('sha256').update(token).digest('hex');
@@ -64,73 +70,78 @@ export async function requireAuth(req, res, next) {
     const token = header.startsWith('Bearer ') ? header.slice(7) : '';
     if (!token) throw new HttpError(401, 'Sign in required.');
 
-    const { rows } = await adminQuery(
-      `SELECT s.id AS session_id, s.expires_at, s.revoked_at,
-              u.id, u.organization_id, u.clinic_id, u.patient_id, u.role_id, u.email, u.full_name,
-              u.phone, u.status, u.mfa_enabled, r.key AS role_key, r.name AS role_name
-       FROM sessions s
-       JOIN users u ON u.id = s.user_id
-       JOIN roles r ON r.id = u.role_id
-       WHERE s.token_hash = $1`,
-      [hashToken(token)]
-    );
-    const row = rows[0];
-    if (!row || row.revoked_at || new Date(row.expires_at) < new Date()) {
-      throw new HttpError(401, 'Session expired. Sign in again.');
-    }
-    if (row.status !== 'active') throw new HttpError(403, 'This account is disabled.');
-
-    let organization = null;
-    if (row.organization_id) {
-      const org = await adminQuery(`SELECT * FROM organizations WHERE id = $1`, [row.organization_id]);
-      organization = org.rows[0] || null;
-      if (organization && ['suspended', 'inactive'].includes(organization.status)) {
+    const tokenHash = hashToken(token);
+    const cached = authCache.get(tokenHash);
+    let session = cached && Date.now() - cached.at < AUTH_TTL_MS ? cached.session : null;
+    if (!session) {
+      const { rows } = await adminQuery(
+        `SELECT s.id AS session_id, s.expires_at, s.revoked_at,
+                u.id, u.organization_id, u.clinic_id, u.patient_id, u.role_id, u.email, u.full_name,
+                u.phone, u.status, u.mfa_enabled, r.key AS role_key, r.name AS role_name,
+                to_jsonb(o) AS organization,
+                COALESCE((SELECT json_agg(rp.permission_key) FROM role_permissions rp WHERE rp.role_id = u.role_id), '[]'::json) AS permissions,
+                COALESCE((SELECT json_agg(uc.clinic_id) FROM user_clinics uc WHERE uc.user_id = u.id), '[]'::json) AS clinic_ids,
+                COALESCE((SELECT json_agg(ud.department_id) FROM user_departments ud WHERE ud.user_id = u.id), '[]'::json) AS department_ids,
+                COALESCE((
+                  SELECT json_agg(c.id) FROM clinics c
+                  WHERE c.organization_id = u.organization_id
+                    AND (r.key IN ('org_admin', 'clinic_admin') OR c.id = u.clinic_id OR c.id IN (SELECT clinic_id FROM user_clinics WHERE user_id = u.id))
+                ), '[]'::json) AS allowed_clinic_ids
+         FROM sessions s
+         JOIN users u ON u.id = s.user_id
+         JOIN roles r ON r.id = u.role_id
+         LEFT JOIN organizations o ON o.id = u.organization_id
+         WHERE s.token_hash = $1`,
+        [tokenHash]
+      );
+      const row = rows[0];
+      if (!row || row.revoked_at || new Date(row.expires_at) < new Date()) {
+        authCache.delete(tokenHash);
+        throw new HttpError(401, 'Session expired. Sign in again.');
+      }
+      if (row.status !== 'active') throw new HttpError(403, 'This account is disabled.');
+      if (row.organization && ['suspended', 'inactive'].includes(row.organization.status)) {
         throw new HttpError(403, 'This organization is not active.');
       }
+      const clinicIds = [...new Set([...(row.clinic_ids || []), row.clinic_id].filter(Boolean))];
+      const allowedClinicIds = [...new Set([...(row.allowed_clinic_ids || []), ...clinicIds])];
+      session = {
+        user: {
+          id: row.id,
+          organizationId: row.organization_id,
+          clinicId: row.clinic_id,
+          patientId: row.patient_id,
+          roleId: row.role_id,
+          roleKey: row.role_key,
+          roleName: row.role_name,
+          email: row.email,
+          fullName: row.full_name,
+          phone: row.phone,
+          isSuper: row.role_key === 'super_admin',
+          permissions: row.role_key === 'super_admin' ? ['*'] : row.permissions,
+          clinicIds,
+          allowedClinicIds,
+          allClinics: ['super_admin', 'org_admin', 'clinic_admin'].includes(row.role_key),
+          departmentIds: row.department_ids || [],
+          sessionId: row.session_id,
+          mfaEnabled: row.mfa_enabled
+        },
+        organization: row.organization
+      };
+      authCache.set(tokenHash, { at: Date.now(), session });
     }
 
-    const perms = await adminQuery(`SELECT permission_key FROM role_permissions WHERE role_id = $1`, [row.role_id]);
-    const clinics = await adminQuery(`SELECT clinic_id FROM user_clinics WHERE user_id = $1`, [row.id]);
-    const departments = await adminQuery(`SELECT department_id FROM user_departments WHERE user_id = $1`, [row.id]);
-    const clinicIds = clinics.rows.map((item) => item.clinic_id);
-    if (row.clinic_id && !clinicIds.includes(row.clinic_id)) clinicIds.push(row.clinic_id);
-
-    req.user = {
-      id: row.id,
-      organizationId: row.organization_id,
-      clinicId: row.clinic_id,
-      patientId: row.patient_id,
-      roleId: row.role_id,
-      roleKey: row.role_key,
-      roleName: row.role_name,
-      email: row.email,
-      fullName: row.full_name,
-      phone: row.phone,
-      isSuper: row.role_key === 'super_admin',
-      permissions: row.role_key === 'super_admin' ? ['*'] : perms.rows.map((item) => item.permission_key),
-      clinicIds,
-      allClinics: ['super_admin', 'org_admin', 'clinic_admin'].includes(row.role_key),
-      departmentIds: departments.rows.map((item) => item.department_id),
-      sessionId: row.session_id,
-      mfaEnabled: row.mfa_enabled
-    };
-    req.organization = organization;
+    req.user = session.user;
+    req.organization = session.organization;
 
     const headerClinic = req.get('x-clinic-id');
     if (headerClinic) {
-      if (!req.user.isSuper && !req.user.allClinics && !req.user.clinicIds.includes(headerClinic)) {
+      if (!req.user.isSuper && !(req.user.allowedClinicIds || req.user.clinicIds).includes(headerClinic)) {
         throw new HttpError(403, 'You do not have access to that branch.');
-      }
-      if (!req.user.isSuper && organization) {
-        const owned = await adminQuery(
-          `SELECT 1 FROM clinics WHERE id = $1 AND organization_id = $2`,
-          [headerClinic, organization.id]
-        );
-        if (!owned.rowCount) throw new HttpError(403, 'That branch is outside this organization.');
       }
       req.clinicId = headerClinic;
     } else {
-      req.clinicId = row.clinic_id;
+      req.clinicId = req.user.clinicId;
     }
     next();
   } catch (error) {

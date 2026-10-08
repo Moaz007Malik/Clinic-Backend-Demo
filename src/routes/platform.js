@@ -12,72 +12,72 @@ router.use(requireAuth);
 router.get('/dashboard', requirePermission('reports.read'), asyncRoute(async (req, res) => {
   const org = requireOrg(req);
   const clinic = req.clinicId;
-  const params = clinic ? [org, clinic] : [org];
-  const clinicSql = clinic ? ' AND clinic_id = $2' : '';
-  const payload = await tx(req, async (client) => {
-    const one = (sql, values) => client.query(sql, values);
-    const patients = await one(`SELECT count(*)::int AS n FROM patients WHERE organization_id = $1 ${clinic ? 'AND clinic_id = $2' : ''}`, params);
-    const appointments = await one(`SELECT count(*)::int AS n FROM appointments WHERE organization_id = $1 ${clinicSql} AND (starts_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date`, params);
-    const revenue = await one(`SELECT COALESCE(SUM(CASE WHEN kind = 'payment' THEN amount ELSE -amount END), 0)::float AS n FROM payments WHERE organization_id = $1 AND (received_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date`, [org]);
-    const outstanding = await one(`SELECT COALESCE(SUM(balance), 0)::float AS n FROM invoices WHERE organization_id = $1 AND status IN ('open', 'partial')`, [org]);
-    const doctors = await one(`SELECT u.full_name,
-              (SELECT count(*)::int FROM appointments a
-                WHERE a.doctor_id = u.id
-                  AND (a.starts_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date) AS visits,
-              (SELECT count(*)::int FROM appointments a
-                WHERE a.doctor_id = u.id AND a.status = 'completed'
-                  AND (a.starts_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date) AS completed,
-              COALESCE((SELECT SUM(i.total * COALESCE(sp.commission_percent, 0) / 100)
-                FROM invoices i WHERE i.doctor_id = u.id AND i.status = 'paid'), 0)::float AS commission
-       FROM users u
-       JOIN roles r ON r.id = u.role_id AND r.key = 'doctor'
-       LEFT JOIN staff_profiles sp ON sp.user_id = u.id
-       WHERE u.organization_id = $1
-       ORDER BY visits DESC`, [org]);
-    const labs = await one(`SELECT count(*)::int AS orders, count(*) FILTER (WHERE status IN ('resulted', 'approved'))::int AS reported FROM lab_orders WHERE organization_id = $1 AND ordered_at::date = CURRENT_DATE`, [org]);
-    const pharmacy = await one(`SELECT COALESCE(SUM(total), 0)::float AS n FROM invoices WHERE organization_id = $1 AND category = 'pharmacy' AND issued_at::date = CURRENT_DATE`, [org]);
-    const inventory = await one(`SELECT count(*)::int AS low FROM (
-              SELECT m.id FROM medicines m LEFT JOIN stock_batches b ON b.medicine_id = m.id
-              WHERE m.organization_id = $1 GROUP BY m.id, m.reorder_level
-              HAVING COALESCE(SUM(b.quantity), 0) <= m.reorder_level
-            ) s`, [org]);
-    const newer = await one(`SELECT count(*)::int AS n FROM patients WHERE organization_id = $1 AND created_at > now() - interval '7 days'`, [org]);
-    const followups = await one(`SELECT count(*)::int AS n FROM encounters WHERE organization_id = $1 AND follow_up_on >= CURRENT_DATE AND follow_up_on < CURRENT_DATE + 7`, [org]);
-    const schedule = await one(
-      `SELECT a.id, a.starts_at, a.status, a.visit_type, a.token_number, a.reason,
-              p.first_name, p.last_name, p.mrn, u.full_name AS doctor_name
-       FROM appointments a
-       JOIN patients p ON p.id = a.patient_id
-       LEFT JOIN users u ON u.id = a.doctor_id
-       WHERE a.organization_id = $1 ${clinic ? 'AND a.clinic_id = $2' : ''}
-         AND (a.starts_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date
-       ORDER BY a.starts_at LIMIT 12`,
-      params
-    );
-    const expiring = await one(
-      `SELECT m.name, b.batch_no, b.expiry_on, b.quantity FROM stock_batches b
-       JOIN medicines m ON m.id = b.medicine_id
-       WHERE b.organization_id = $1 AND b.quantity > 0 AND b.expiry_on < CURRENT_DATE + 90
-       ORDER BY b.expiry_on LIMIT 6`,
-      [org]
-    );
-    return {
-      patients: patients.rows[0].n,
-      appointmentsToday: appointments.rows[0].n,
-      revenueToday: revenue.rows[0].n,
-      outstanding: outstanding.rows[0].n,
-      doctors: doctors.rows,
-      labOrders: labs.rows[0].orders,
-      labReported: labs.rows[0].reported,
-      pharmacySales: pharmacy.rows[0].n,
-      lowStock: inventory.rows[0].low,
-      newPatients: newer.rows[0].n,
-      followUps: followups.rows[0].n,
-      schedule: schedule.rows,
-      expiring: expiring.rows
-    };
+  const { rows } = await q(
+    req,
+    `SELECT
+       (SELECT count(*)::int FROM patients WHERE organization_id = $1 AND ($2::uuid IS NULL OR clinic_id = $2)) AS patients,
+       (SELECT count(*)::int FROM appointments WHERE organization_id = $1 AND ($2::uuid IS NULL OR clinic_id = $2)
+          AND (starts_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date) AS appointments_today,
+       (SELECT COALESCE(SUM(CASE WHEN kind = 'payment' THEN amount ELSE -amount END), 0)::float FROM payments
+          WHERE organization_id = $1 AND (received_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date) AS revenue_today,
+       (SELECT COALESCE(SUM(balance), 0)::float FROM invoices WHERE organization_id = $1 AND status IN ('open', 'partial')) AS outstanding,
+       (SELECT COALESCE(json_agg(d ORDER BY d.visits DESC), '[]'::json) FROM (
+          SELECT u.full_name,
+                 (SELECT count(*)::int FROM appointments a WHERE a.doctor_id = u.id
+                    AND (a.starts_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date) AS visits,
+                 (SELECT count(*)::int FROM appointments a WHERE a.doctor_id = u.id AND a.status = 'completed'
+                    AND (a.starts_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date) AS completed,
+                 COALESCE((SELECT SUM(i.total * COALESCE(sp.commission_percent, 0) / 100)
+                    FROM invoices i WHERE i.doctor_id = u.id AND i.status = 'paid'), 0)::float AS commission
+          FROM users u
+          JOIN roles r ON r.id = u.role_id AND r.key = 'doctor'
+          LEFT JOIN staff_profiles sp ON sp.user_id = u.id
+          WHERE u.organization_id = $1
+       ) d) AS doctors,
+       (SELECT count(*)::int FROM lab_orders WHERE organization_id = $1 AND ordered_at::date = CURRENT_DATE) AS lab_orders,
+       (SELECT count(*)::int FROM lab_orders WHERE organization_id = $1 AND ordered_at::date = CURRENT_DATE AND status IN ('resulted', 'approved')) AS lab_reported,
+       (SELECT COALESCE(SUM(total), 0)::float FROM invoices WHERE organization_id = $1 AND category = 'pharmacy' AND issued_at::date = CURRENT_DATE) AS pharmacy_sales,
+       (SELECT count(*)::int FROM (
+          SELECT m.id FROM medicines m LEFT JOIN stock_batches b ON b.medicine_id = m.id
+          WHERE m.organization_id = $1 GROUP BY m.id, m.reorder_level
+          HAVING COALESCE(SUM(b.quantity), 0) <= m.reorder_level
+       ) s) AS low_stock,
+       (SELECT count(*)::int FROM patients WHERE organization_id = $1 AND created_at > now() - interval '7 days') AS new_patients,
+       (SELECT count(*)::int FROM encounters WHERE organization_id = $1 AND follow_up_on >= CURRENT_DATE AND follow_up_on < CURRENT_DATE + 7) AS follow_ups,
+       (SELECT COALESCE(json_agg(s ORDER BY s.starts_at), '[]'::json) FROM (
+          SELECT a.id, a.starts_at, a.status, a.visit_type, a.token_number, a.reason,
+                 p.first_name, p.last_name, p.mrn, u.full_name AS doctor_name
+          FROM appointments a
+          JOIN patients p ON p.id = a.patient_id
+          LEFT JOIN users u ON u.id = a.doctor_id
+          WHERE a.organization_id = $1 AND ($2::uuid IS NULL OR a.clinic_id = $2)
+            AND (a.starts_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date
+          ORDER BY a.starts_at LIMIT 12
+       ) s) AS schedule,
+       (SELECT COALESCE(json_agg(e ORDER BY e.expiry_on), '[]'::json) FROM (
+          SELECT m.name, b.batch_no, b.expiry_on, b.quantity
+          FROM stock_batches b JOIN medicines m ON m.id = b.medicine_id
+          WHERE b.organization_id = $1 AND b.quantity > 0 AND b.expiry_on < CURRENT_DATE + 90
+          ORDER BY b.expiry_on LIMIT 6
+       ) e) AS expiring`,
+    [org, clinic || null]
+  );
+  const row = rows[0];
+  res.json({
+    patients: row.patients,
+    appointmentsToday: row.appointments_today,
+    revenueToday: row.revenue_today,
+    outstanding: row.outstanding,
+    doctors: row.doctors,
+    labOrders: row.lab_orders,
+    labReported: row.lab_reported,
+    pharmacySales: row.pharmacy_sales,
+    lowStock: row.low_stock,
+    newPatients: row.new_patients,
+    followUps: row.follow_ups,
+    schedule: row.schedule,
+    expiring: row.expiring
   });
-  res.json(payload);
 }));
 
 router.get('/platform/overview', requirePermission('platform.health'), asyncRoute(async (req, res) => {
