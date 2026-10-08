@@ -7,9 +7,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const ssl = { rejectUnauthorized: false };
+const POOLER_HOST = 'aws-0-ap-southeast-2.pooler.supabase.com';
+
+function connectionStringFor(connectionString) {
+  if (!connectionString) return connectionString;
+  const url = new URL(connectionString);
+  const match = url.hostname.match(/^db\.([a-z0-9]+)\.supabase\.co$/i);
+  if (!match) return connectionString;
+  const ref = match[1];
+  if (!url.username.includes('.')) url.username = `${url.username}.${ref}`;
+  url.hostname = POOLER_HOST;
+  url.port = '5432';
+  return url.toString();
+}
 
 function makePool(connectionString) {
-  const pool = new pg.Pool({ connectionString, ssl, max: 8, idleTimeoutMillis: 20000 });
+  const pool = new pg.Pool({ connectionString: connectionStringFor(connectionString), ssl, max: 8, idleTimeoutMillis: 20000 });
   return pool;
 }
 
