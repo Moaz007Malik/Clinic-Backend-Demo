@@ -7,7 +7,7 @@ import { hashPassword } from './auth.js';
 import { karachiStamp } from './http.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const schemaPath = path.join(__dirname, '../../database/schema.sql');
+const schemaPath = path.join(__dirname, '../schema.sql');
 
 async function ensureRole() {
   const password = String(process.env.APP_ROLE_PASSWORD || '').replace(/'/g, "''");
