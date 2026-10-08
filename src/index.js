@@ -13,7 +13,26 @@ import platformRoutes from './routes/platform.js';
 const app = express();
 app.set('trust proxy', 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-app.use(cors({ origin: ['http://localhost:5173', 'http://127.0.0.1:5173'], credentials: true }));
+const allowedOrigins = new Set([
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'https://clinic-frontend-demo.vercel.app',
+  ...(process.env.CORS_ORIGIN || '').split(',').map((origin) => origin.trim()).filter(Boolean)
+]);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+    try {
+      const { protocol, hostname } = new URL(origin);
+      const preview = protocol === 'https:' && hostname.endsWith('.vercel.app') && hostname.startsWith('clinic-frontend-demo');
+      return callback(null, preview);
+    } catch {
+      return callback(null, false);
+    }
+  },
+  credentials: true
+}));
 app.use(express.json({ limit: '4mb' }));
 
 app.get('/api/health', (_req, res) => {
