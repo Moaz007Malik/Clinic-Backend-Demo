@@ -168,7 +168,12 @@ router.get('/auth/me', requireAuth, asyncRoute(async (req, res) => {
   let clinics = [];
   let subscription = null;
   let unread = 0;
-  if (!req.user.isSuper && req.user.organizationId) {
+  let organization = req.organization;
+  if (req.user.isSuper && req.user.organizationId) {
+    const found = await adminQuery(`SELECT * FROM organizations WHERE id = $1`, [req.user.organizationId]);
+    organization = found.rows[0] || null;
+  }
+  if (organization && req.user.organizationId) {
     const { rows } = await adminQuery(
       `SELECT
          COALESCE((
@@ -217,7 +222,7 @@ router.get('/auth/me', requireAuth, asyncRoute(async (req, res) => {
       permissions: req.user.permissions,
       allClinics: req.user.allClinics
     },
-    organization: req.organization,
+    organization,
     clinics,
     subscription,
     unread

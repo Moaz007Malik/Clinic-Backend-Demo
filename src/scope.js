@@ -2,7 +2,7 @@ import { HttpError } from './http.js';
 
 export function requireOrg(req) {
   if (req.user.isSuper) {
-    const requested = req.query.organizationId || req.body?.organizationId;
+    const requested = req.user.organizationId || req.query.organizationId || req.body?.organizationId;
     if (!requested) throw new HttpError(400, 'Choose an organization first.');
     return requested;
   }

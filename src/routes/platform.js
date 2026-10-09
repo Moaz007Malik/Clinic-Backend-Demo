@@ -574,8 +574,7 @@ router.delete('/sessions/:id', requirePermission('audit.read'), asyncRoute(async
 }));
 
 router.get('/backup', requirePermission('settings.manage'), asyncRoute(async (req, res) => {
-  const org = req.user.isSuper ? req.query.organizationId : req.user.organizationId;
-  if (!org) throw new HttpError(400, 'Choose an organization to export.');
+  const org = requireOrg(req);
   const dump = { version: 1, exportedAt: new Date().toISOString(), organizationId: org, tables: {} };
   const organization = await q(req, `SELECT * FROM organizations WHERE id = $1`, [org]);
   if (!organization.rowCount) throw new HttpError(404, 'Organization not found.');
@@ -590,7 +589,7 @@ router.get('/backup', requirePermission('settings.manage'), asyncRoute(async (re
 router.post('/restore', requirePermission('settings.manage'), asyncRoute(async (req, res) => {
   if (req.body?.confirm !== 'RESTORE') throw new HttpError(400, 'Type RESTORE to confirm replacement of tenant data.');
   const dump = req.body?.dump;
-  const org = req.user.isSuper ? dump?.organizationId : req.user.organizationId;
+  const org = requireOrg(req);
   if (!dump?.tables || dump.organizationId !== org) throw new HttpError(400, 'Backup does not match this organization.');
   await tx(req, async (client) => {
     for (const table of [...BACKUP_TABLES].reverse()) {

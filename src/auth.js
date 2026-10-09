@@ -133,6 +133,12 @@ export async function requireAuth(req, res, next) {
 
     req.user = session.user;
     req.organization = session.organization;
+    if (req.user.isSuper) {
+      const headerOrg = String(req.get('x-organization-id') || '').trim();
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(headerOrg)) {
+        req.user = { ...session.user, organizationId: headerOrg };
+      }
+    }
 
     const headerClinic = req.get('x-clinic-id');
     if (headerClinic) {
