@@ -17,16 +17,16 @@ router.get('/dashboard', requirePermission('reports.read'), asyncRoute(async (re
     `SELECT
        (SELECT count(*)::int FROM patients WHERE organization_id = $1 AND ($2::uuid IS NULL OR clinic_id = $2)) AS patients,
        (SELECT count(*)::int FROM appointments WHERE organization_id = $1 AND ($2::uuid IS NULL OR clinic_id = $2)
-          AND (starts_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date) AS appointments_today,
+          AND (starts_at AT TIME ZONE 'Asia/Muscat')::date = (now() AT TIME ZONE 'Asia/Muscat')::date) AS appointments_today,
        (SELECT COALESCE(SUM(CASE WHEN kind = 'payment' THEN amount ELSE -amount END), 0)::float FROM payments
-          WHERE organization_id = $1 AND (received_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date) AS revenue_today,
+          WHERE organization_id = $1 AND (received_at AT TIME ZONE 'Asia/Muscat')::date = (now() AT TIME ZONE 'Asia/Muscat')::date) AS revenue_today,
        (SELECT COALESCE(SUM(balance), 0)::float FROM invoices WHERE organization_id = $1 AND status IN ('open', 'partial')) AS outstanding,
        (SELECT COALESCE(json_agg(d ORDER BY d.visits DESC), '[]'::json) FROM (
           SELECT u.full_name,
                  (SELECT count(*)::int FROM appointments a WHERE a.doctor_id = u.id
-                    AND (a.starts_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date) AS visits,
+                    AND (a.starts_at AT TIME ZONE 'Asia/Muscat')::date = (now() AT TIME ZONE 'Asia/Muscat')::date) AS visits,
                  (SELECT count(*)::int FROM appointments a WHERE a.doctor_id = u.id AND a.status = 'completed'
-                    AND (a.starts_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date) AS completed,
+                    AND (a.starts_at AT TIME ZONE 'Asia/Muscat')::date = (now() AT TIME ZONE 'Asia/Muscat')::date) AS completed,
                  COALESCE((SELECT SUM(i.total * COALESCE(sp.commission_percent, 0) / 100)
                     FROM invoices i WHERE i.doctor_id = u.id AND i.status = 'paid'), 0)::float AS commission
           FROM users u
@@ -43,7 +43,15 @@ router.get('/dashboard', requirePermission('reports.read'), asyncRoute(async (re
           HAVING COALESCE(SUM(b.quantity), 0) <= m.reorder_level
        ) s) AS low_stock,
        (SELECT count(*)::int FROM patients WHERE organization_id = $1 AND created_at > now() - interval '7 days') AS new_patients,
-       (SELECT count(*)::int FROM encounters WHERE organization_id = $1 AND follow_up_on >= CURRENT_DATE AND follow_up_on < CURRENT_DATE + 7) AS follow_ups,
+       (SELECT count(*)::int FROM encounters WHERE organization_id = $1 AND follow_up_on >= (now() AT TIME ZONE 'Asia/Muscat')::date AND follow_up_on < (now() AT TIME ZONE 'Asia/Muscat')::date + 7) AS follow_ups,
+       (SELECT count(*)::int FROM appointments WHERE organization_id = $1 AND ($2::uuid IS NULL OR clinic_id = $2) AND status = 'no_show'
+          AND (starts_at AT TIME ZONE 'Asia/Muscat')::date = (now() AT TIME ZONE 'Asia/Muscat')::date) AS no_shows,
+       (SELECT count(*)::int FROM appointments WHERE organization_id = $1 AND ($2::uuid IS NULL OR clinic_id = $2) AND status IN ('checked_in', 'in_consult')
+          AND (starts_at AT TIME ZONE 'Asia/Muscat')::date = (now() AT TIME ZONE 'Asia/Muscat')::date) AS in_queue,
+       (SELECT count(*)::int FROM invoices WHERE organization_id = $1 AND status IN ('open', 'partial')) AS open_invoices,
+       (SELECT count(*)::int FROM claims WHERE organization_id = $1 AND status = 'submitted') AS claims_pending,
+       (SELECT count(*)::int FROM beds WHERE organization_id = $1 AND ($2::uuid IS NULL OR clinic_id = $2) AND status = 'occupied') AS beds_occupied,
+       (SELECT count(*)::int FROM beds WHERE organization_id = $1 AND ($2::uuid IS NULL OR clinic_id = $2) AND status <> 'maintenance') AS beds_ready,
        (SELECT COALESCE(json_agg(s ORDER BY s.starts_at), '[]'::json) FROM (
           SELECT a.id, a.starts_at, a.status, a.visit_type, a.token_number, a.reason,
                  p.first_name, p.last_name, p.mrn, u.full_name AS doctor_name
@@ -51,7 +59,7 @@ router.get('/dashboard', requirePermission('reports.read'), asyncRoute(async (re
           JOIN patients p ON p.id = a.patient_id
           LEFT JOIN users u ON u.id = a.doctor_id
           WHERE a.organization_id = $1 AND ($2::uuid IS NULL OR a.clinic_id = $2)
-            AND (a.starts_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date
+            AND (a.starts_at AT TIME ZONE 'Asia/Muscat')::date = (now() AT TIME ZONE 'Asia/Muscat')::date
           ORDER BY a.starts_at LIMIT 12
        ) s) AS schedule,
        (SELECT COALESCE(json_agg(e ORDER BY e.expiry_on), '[]'::json) FROM (
@@ -59,7 +67,38 @@ router.get('/dashboard', requirePermission('reports.read'), asyncRoute(async (re
           FROM stock_batches b JOIN medicines m ON m.id = b.medicine_id
           WHERE b.organization_id = $1 AND b.quantity > 0 AND b.expiry_on < CURRENT_DATE + 90
           ORDER BY b.expiry_on LIMIT 6
-       ) e) AS expiring`,
+       ) e) AS expiring,
+       (SELECT COALESCE(json_agg(w ORDER BY w.day), '[]'::json) FROM (
+          SELECT to_char(d::date, 'YYYY-MM-DD') AS day,
+            (SELECT count(*)::int FROM appointments a
+              WHERE a.organization_id = $1 AND ($2::uuid IS NULL OR a.clinic_id = $2)
+                AND (a.starts_at AT TIME ZONE 'Asia/Muscat')::date = d::date) AS visits,
+            (SELECT COALESCE(SUM(CASE WHEN kind = 'payment' THEN amount ELSE -amount END), 0)::float FROM payments p
+              WHERE p.organization_id = $1
+                AND (p.received_at AT TIME ZONE 'Asia/Muscat')::date = d::date) AS revenue
+          FROM generate_series((now() AT TIME ZONE 'Asia/Muscat')::date - 13, (now() AT TIME ZONE 'Asia/Muscat')::date, interval '1 day') d
+       ) w) AS trend,
+       (SELECT COALESCE(json_agg(h ORDER BY h.hour), '[]'::json) FROM (
+          SELECT gs AS hour,
+            (SELECT count(*)::int FROM appointments a
+              WHERE a.organization_id = $1 AND ($2::uuid IS NULL OR a.clinic_id = $2)
+                AND (a.starts_at AT TIME ZONE 'Asia/Muscat')::date = (now() AT TIME ZONE 'Asia/Muscat')::date
+                AND EXTRACT(HOUR FROM a.starts_at AT TIME ZONE 'Asia/Muscat') = gs) AS visits
+          FROM generate_series(8, 19) gs
+       ) h) AS hours,
+       (SELECT COALESCE(json_agg(st ORDER BY st.value DESC), '[]'::json) FROM (
+          SELECT status AS label, count(*)::int AS value
+          FROM appointments
+          WHERE organization_id = $1 AND ($2::uuid IS NULL OR clinic_id = $2)
+            AND (starts_at AT TIME ZONE 'Asia/Muscat')::date >= (now() AT TIME ZONE 'Asia/Muscat')::date - 13
+          GROUP BY status
+       ) st) AS status_mix,
+       (SELECT COALESCE(json_agg(c ORDER BY c.amount DESC), '[]'::json) FROM (
+          SELECT category AS label, count(*)::int AS count, COALESCE(SUM(total), 0)::float AS amount
+          FROM invoices
+          WHERE organization_id = $1 AND status <> 'void'
+          GROUP BY category
+       ) c) AS categories`,
     [org, clinic || null]
   );
   const row = rows[0];
@@ -75,13 +114,23 @@ router.get('/dashboard', requirePermission('reports.read'), asyncRoute(async (re
     lowStock: row.low_stock,
     newPatients: row.new_patients,
     followUps: row.follow_ups,
+    noShows: row.no_shows,
+    inQueue: row.in_queue,
+    openInvoices: row.open_invoices,
+    claimsPending: row.claims_pending,
+    bedsOccupied: row.beds_occupied,
+    bedsReady: row.beds_ready,
     schedule: row.schedule,
-    expiring: row.expiring
+    expiring: row.expiring,
+    trend: row.trend,
+    hours: row.hours,
+    statusMix: row.status_mix,
+    categories: row.categories
   });
 }));
 
 router.get('/platform/overview', requirePermission('platform.health'), asyncRoute(async (req, res) => {
-  const [tenants, users, patients, revenue, usage, storage, health] = await Promise.all([
+  const [tenants, users, patients, revenue, usage, storage, health, activity] = await Promise.all([
     adminQuery(`SELECT o.id, o.name, o.slug, o.status, o.city, o.primary_color, o.created_at,
                        s.status AS subscription_status, s.trial_ends_at, s.current_period_end, p.name AS plan_name,
                        (SELECT count(*)::int FROM clinics c WHERE c.organization_id = o.id) AS clinics,
@@ -96,7 +145,12 @@ router.get('/platform/overview', requirePermission('platform.health'), asyncRout
     adminQuery(`SELECT COALESCE(SUM(amount), 0)::float AS n FROM saas_invoices WHERE status = 'paid'`),
     adminQuery(`SELECT count(*)::int AS n FROM activity_logs WHERE created_at > now() - interval '1 day'`),
     adminQuery(`SELECT pg_database_size(current_database())::bigint AS bytes`),
-    adminQuery(`SELECT now() AS database_time, current_setting('server_version') AS version`)
+    adminQuery(`SELECT now() AS database_time, current_setting('server_version') AS version`),
+    adminQuery(`SELECT COALESCE(json_agg(w ORDER BY w.day), '[]'::json) AS days FROM (
+      SELECT to_char(d::date, 'YYYY-MM-DD') AS day,
+        (SELECT count(*)::int FROM activity_logs a WHERE (a.created_at AT TIME ZONE 'Asia/Muscat')::date = d::date) AS events
+      FROM generate_series((now() AT TIME ZONE 'Asia/Muscat')::date - 13, (now() AT TIME ZONE 'Asia/Muscat')::date, interval '1 day') d
+    ) w`)
   ]);
   res.json({
     tenants: tenants.rows,
@@ -105,7 +159,8 @@ router.get('/platform/overview', requirePermission('platform.health'), asyncRout
     subscriptionRevenue: revenue.rows[0].n,
     apiCallsToday: usage.rows[0].n,
     storageBytes: Number(storage.rows[0].bytes),
-    health: health.rows[0]
+    health: health.rows[0],
+    activity: activity.rows[0].days
   });
 }));
 
@@ -215,7 +270,7 @@ router.post('/clinics', requirePermission('clinics.manage'), asyncRoute(async (r
     const created = await client.query(
       `INSERT INTO clinics (organization_id, name, code, phone, email, address, city, timezone)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [org, req.body.name, String(req.body.code).toUpperCase(), req.body.phone || null, req.body.email || null, req.body.address || null, req.body.city || null, req.body.timezone || 'Asia/Karachi']
+      [org, req.body.name, String(req.body.code).toUpperCase(), req.body.phone || null, req.body.email || null, req.body.address || null, req.body.city || null, req.body.timezone || 'Asia/Muscat']
     );
     await audit(client, req, 'clinic.created', 'clinics', created.rows[0].id);
     return created.rows[0];

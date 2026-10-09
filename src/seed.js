@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { PERMISSIONS, ROLE_GRANTS, ROLE_NAMES } from './catalog.js';
 import { adminPool, adminQuery } from './db.js';
 import { hashPassword } from './auth.js';
-import { karachiStamp } from './http.js';
+import { muscatStamp } from './http.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const schemaPath = path.join(__dirname, '../schema.sql');
@@ -47,9 +47,9 @@ async function upsertCatalog(client) {
   }
   const plans = [
     ['starter', 'Starter', 'A single clinic finding its rhythm.', 0, 0, 5, 300, 1, 2000, 100, 50, ['Patient registry', 'Appointments', 'Billing']],
-    ['clinic', 'Clinic', 'For groups running a few branches.', 18000, 180000, 40, 8000, 3, 20000, 2000, 1000, ['EMR', 'Laboratory', 'Pharmacy', 'Insurance']],
-    ['hospital', 'Hospital', 'Wards, imaging, and a larger staff.', 48000, 480000, 150, 40000, 10, 100000, 10000, 5000, ['Wards and beds', 'Radiology', 'HR', 'API access']],
-    ['enterprise', 'Enterprise', 'Unlimited scale with dedicated controls.', 96000, 960000, null, null, null, null, null, null, ['Unlimited branches', 'PACS connector', 'Webhooks', 'Priority support']]
+    ['clinic', 'Clinic', 'For groups running a few branches.', 180, 1800, 40, 8000, 3, 20000, 2000, 1000, ['EMR', 'Laboratory', 'Pharmacy', 'Insurance']],
+    ['hospital', 'Hospital', 'Wards, imaging, and a larger staff.', 480, 4800, 150, 40000, 10, 100000, 10000, 5000, ['Wards and beds', 'Radiology', 'HR', 'API access']],
+    ['enterprise', 'Enterprise', 'Unlimited scale with dedicated controls.', 960, 9600, null, null, null, null, null, null, ['Unlimited branches', 'PACS connector', 'Webhooks', 'Priority support']]
   ];
   for (const plan of plans) {
     const values = [...plan];
@@ -109,8 +109,8 @@ async function seedDemo(client, passwordHash) {
 
   await client.query(
     `INSERT INTO organizations (id, name, legal_name, slug, status, primary_color, accent_color, email, phone, address, city, country, timezone, settings)
-     VALUES ($1, 'Northwind Health', 'Northwind Health (Pvt) Ltd', 'northwind', 'active', '#1c6b52', '#c56a32', 'hello@northwind.local', '+92 21 3522 0100', '12 Harbor Road', 'Karachi', 'Pakistan', 'Asia/Karachi', '{"sessionHours":8,"passwordMinLength":10}'::jsonb),
-            ($2, 'Lumen Pediatrics', 'Lumen Pediatrics', 'lumen', 'trial', '#2457a6', '#e0a100', 'hello@lumen.local', '+92 42 111 2200', '8 Garden Lane', 'Lahore', 'Pakistan', 'Asia/Karachi', '{}'::jsonb)`,
+     VALUES ($1, 'Northwind Health', 'Northwind Health LLC', 'northwind', 'active', '#1c6b52', '#c56a32', 'hello@northwind.local', '+968 2455 0100', '12 Harbor Road', 'Muscat', 'Oman', 'Asia/Muscat', '{"sessionHours":8,"passwordMinLength":10}'::jsonb),
+            ($2, 'Lumen Pediatrics', 'Lumen Pediatrics', 'lumen', 'trial', '#2457a6', '#e0a100', 'hello@lumen.local', '+968 2455 2200', '8 Garden Lane', 'Muscat', 'Oman', 'Asia/Muscat', '{}'::jsonb)`,
     [northwind, lumen]
   );
 
@@ -123,15 +123,15 @@ async function seedDemo(client, passwordHash) {
   );
   await client.query(
     `INSERT INTO saas_invoices (organization_id, number, amount, status, due_on, paid_on)
-     VALUES ($1, 'SAAS-10021', 180000, 'paid', CURRENT_DATE - 20, CURRENT_DATE - 18)`,
+     VALUES ($1, 'SAAS-10021', 1800, 'paid', CURRENT_DATE - 20, CURRENT_DATE - 18)`,
     [northwind]
   );
 
   await client.query(
     `INSERT INTO clinics (id, organization_id, name, code, phone, email, address, city, timezone, is_primary)
-     VALUES ($1,$2,'Harbor Clinic','HBR','+92 21 3522 0101','harbor@northwind.local','12 Harbor Road','Karachi','Asia/Karachi',true),
-            ($3,$2,'Ridge Street Clinic','RDG','+92 21 3522 0188','ridge@northwind.local','44 Ridge Street','Karachi','Asia/Karachi',false),
-            ($4,$5,'Lumen Gulberg','GUL','+92 42 111 2200','gulberg@lumen.local','8 Garden Lane','Lahore','Asia/Karachi',true)`,
+     VALUES ($1,$2,'Harbor Clinic','HBR','+968 2455 0101','harbor@northwind.local','12 Harbor Road','Muscat','Asia/Muscat',true),
+            ($3,$2,'Ridge Street Clinic','RDG','+968 2455 0188','ridge@northwind.local','44 Ridge Street','Muscat','Asia/Muscat',false),
+            ($4,$5,'Lumen Qurum','GUL','+968 2455 2200','gulberg@lumen.local','8 Garden Lane','Muscat','Asia/Muscat',true)`,
     [harbor, northwind, ridge, lumenClinic, lumen]
   );
 
@@ -164,13 +164,13 @@ async function seedDemo(client, passwordHash) {
   const followService = id();
   await client.query(
     `INSERT INTO services (id, organization_id, name, category, base_price, duration_minutes) VALUES
-     ($1,$2,'General consultation','consultation',3500,20),
-     ($3,$2,'Follow-up visit','consultation',2000,15),
-     ($4,$2,'Wound dressing','procedure',1500,15)`,
+     ($1,$2,'General consultation','consultation',35,20),
+     ($3,$2,'Follow-up visit','consultation',20,15),
+     ($4,$2,'Wound dressing','procedure',15,15)`,
     [consultService, northwind, followService, id()]
   );
   await client.query(
-    `INSERT INTO service_prices (organization_id, service_id, clinic_id, price) VALUES ($1,$2,$3,4000)`,
+    `INSERT INTO service_prices (organization_id, service_id, clinic_id, price) VALUES ($1,$2,$3,40)`,
     [northwind, consultService, ridge]
   );
   for (const clinicId of [harbor, ridge]) {
@@ -222,8 +222,8 @@ async function seedDemo(client, passwordHash) {
   await client.query(
     `INSERT INTO staff_profiles (user_id, organization_id, designation, specialization, qualifications, license_number, license_expires_on, consultation_fee, commission_percent, bio)
      VALUES
-     ($1,$2,'Consultant Physician','Internal medicine','MBBS, FCPS','PMC-44821', CURRENT_DATE + 400, 3500, 15, 'Looks after long-term conditions and same-day sick visits.'),
-     ($3,$2,'Consultant Pediatrician','Pediatrics','MBBS, MRCPCH','PMC-22910', CURRENT_DATE + 220, 4000, 12, 'Sees children at Ridge Street and on video.')`,
+     ($1,$2,'Consultant Physician','Internal medicine','MBBS, FCPS','MOH-44821', CURRENT_DATE + 400, 35, 15, 'Looks after long-term conditions and same-day sick visits.'),
+     ($3,$2,'Consultant Pediatrician','Pediatrics','MBBS, MRCPCH','MOH-22910', CURRENT_DATE + 220, 40, 12, 'Sees children at Ridge Street and on video.')`,
     [users['dr.hassan@northwind.local'], northwind, users['dr.okonkwo@northwind.local']]
   );
   for (const doctorId of [users['dr.hassan@northwind.local'], users['dr.okonkwo@northwind.local']]) {
@@ -320,14 +320,14 @@ async function seedDemo(client, passwordHash) {
   const hassan = users['dr.hassan@northwind.local'];
   const ada = users['dr.okonkwo@northwind.local'];
   const visits = [
-    [patientIds['Maya Rahman'], hassan, karachiStamp(9, 0), 'confirmed', 'in_person', 'Blood pressure review', 12],
-    [patientIds['Yusuf Rahman'], ada, karachiStamp(9, 40), 'checked_in', 'walk_in', 'Fever and cough', 4],
-    [patientIds['Elena Petrova'], hassan, karachiStamp(11, 30), 'scheduled', 'telemedicine', 'Migraine follow-up', null],
-    [patientIds['Fatima Noor'], hassan, karachiStamp(14, 0), 'scheduled', 'in_person', 'Antenatal visit', null],
-    [patientIds['Arjun Mehta'], hassan, karachiStamp(15, 20), 'scheduled', 'in_person', 'Diabetes review', null],
-    [patientIds['James Okello'], hassan, karachiStamp(10, 0, -1), 'no_show', 'in_person', 'Fasting glucose', null],
-    [patientIds['Daniel Cho'], ada, karachiStamp(11, 0, -1), 'completed', 'in_person', 'Inhaler review', null],
-    [patientIds['Sofia Alvarez'], ada, karachiStamp(16, 0), 'confirmed', 'in_person', 'Shoulder ultrasound request', null]
+    [patientIds['Maya Rahman'], hassan, muscatStamp(9, 0), 'confirmed', 'in_person', 'Blood pressure review', 12],
+    [patientIds['Yusuf Rahman'], ada, muscatStamp(9, 40), 'checked_in', 'walk_in', 'Fever and cough', 4],
+    [patientIds['Elena Petrova'], hassan, muscatStamp(11, 30), 'scheduled', 'telemedicine', 'Migraine follow-up', null],
+    [patientIds['Fatima Noor'], hassan, muscatStamp(14, 0), 'scheduled', 'in_person', 'Antenatal visit', null],
+    [patientIds['Arjun Mehta'], hassan, muscatStamp(15, 20), 'scheduled', 'in_person', 'Diabetes review', null],
+    [patientIds['James Okello'], hassan, muscatStamp(10, 0, -1), 'no_show', 'in_person', 'Fasting glucose', null],
+    [patientIds['Daniel Cho'], ada, muscatStamp(11, 0, -1), 'completed', 'in_person', 'Inhaler review', null],
+    [patientIds['Sofia Alvarez'], ada, muscatStamp(16, 0), 'confirmed', 'in_person', 'Shoulder ultrasound request', null]
   ];
   const appointmentIds = {};
   for (const [patientId, doctorId, starts, status, type, reason, token] of visits) {
@@ -405,11 +405,11 @@ async function seedDemo(client, passwordHash) {
     Salbutamol: id()
   };
   const medRows = [
-    [meds.Amoxicillin, 'Amoxicillin', 'Amoxicillin', 'Amoxil', 'capsule', '500 mg', 40, 180],
-    [meds.Paracetamol, 'Paracetamol', 'Paracetamol', 'Panadol', 'tablet', '500 mg', 50, 40],
-    [meds.Amlodipine, 'Amlodipine', 'Amlodipine', 'Norvasc', 'tablet', '5 mg', 30, 25],
-    [meds.Metformin, 'Metformin', 'Metformin', 'Glucophage', 'tablet', '500 mg', 30, 15],
-    [meds.Salbutamol, 'Salbutamol inhaler', 'Salbutamol', 'Ventolin', 'inhaler', '100 mcg', 8, 650]
+    [meds.Amoxicillin, 'Amoxicillin', 'Amoxicillin', 'Amoxil', 'capsule', '500 mg', 40, 1.8],
+    [meds.Paracetamol, 'Paracetamol', 'Paracetamol', 'Panadol', 'tablet', '500 mg', 50, 0.4],
+    [meds.Amlodipine, 'Amlodipine', 'Amlodipine', 'Norvasc', 'tablet', '5 mg', 30, 0.25],
+    [meds.Metformin, 'Metformin', 'Metformin', 'Glucophage', 'tablet', '500 mg', 30, 0.15],
+    [meds.Salbutamol, 'Salbutamol inhaler', 'Salbutamol', 'Ventolin', 'inhaler', '100 mcg', 8, 6.5]
   ];
   for (const row of medRows) {
     await client.query(
@@ -424,11 +424,11 @@ async function seedDemo(client, passwordHash) {
     [supplier, northwind]
   );
   const batches = [
-    [meds.Amoxicillin, 'AMX-2401', 120, 90, 90],
-    [meds.Paracetamol, 'PCM-1180', 30, 8, 40],
-    [meds.Amlodipine, 'AML-090', 200, 400, 6],
-    [meds.Metformin, 'MET-332', 80, 12, 60],
-    [meds.Salbutamol, 'SAL-014', 6, 300, 4]
+    [meds.Amoxicillin, 'AMX-2401', 120, 90, 0.9],
+    [meds.Paracetamol, 'PCM-1180', 30, 8, 0.4],
+    [meds.Amlodipine, 'AML-090', 200, 400, 0.06],
+    [meds.Metformin, 'MET-332', 80, 12, 0.6],
+    [meds.Salbutamol, 'SAL-014', 6, 300, 0.04]
   ];
   for (const [medicineId, batchNo, days, qty, cost] of batches) {
     await client.query(
@@ -448,7 +448,7 @@ async function seedDemo(client, passwordHash) {
     [po, northwind, harbor, supplier]
   );
   await client.query(
-    `INSERT INTO purchase_order_items (organization_id, purchase_order_id, medicine_id, quantity, unit_cost) VALUES ($1,$2,$3,20,420)`,
+    `INSERT INTO purchase_order_items (organization_id, purchase_order_id, medicine_id, quantity, unit_cost) VALUES ($1,$2,$3,20,4.2)`,
     [northwind, po, meds.Salbutamol]
   );
 
@@ -456,9 +456,9 @@ async function seedDemo(client, passwordHash) {
   const fbs = id();
   await client.query(
     `INSERT INTO lab_tests (id, organization_id, code, name, sample_type, price, unit, ref_low, ref_high, turnaround_hours) VALUES
-     ($1,$2,'CBC','Complete blood count','Blood',1800,'g/dL',12,15.5,8),
-     ($3,$2,'FBS','Fasting blood glucose','Blood',700,'mg/dL',70,99,6),
-     ($4,$2,'HCG','Pregnancy test','Urine',900,NULL,NULL,NULL,2)`,
+     ($1,$2,'CBC','Complete blood count','Blood',18,'g/dL',12,15.5,8),
+     ($3,$2,'FBS','Fasting blood glucose','Blood',7,'mg/dL',70,99,6),
+     ($4,$2,'HCG','Pregnancy test','Urine',9,NULL,NULL,NULL,2)`,
     [cbc, northwind, fbs, id()]
   );
   const labOrder = id();
@@ -498,22 +498,22 @@ async function seedDemo(client, passwordHash) {
   await client.query(
     `INSERT INTO invoices (id, organization_id, clinic_id, patient_id, doctor_id, number, category, status, subtotal, discount, tax, total, balance)
      VALUES
-     ($1,$2,$3,$4,$5,'INV-01001','consultation','open',3500,0,0,3500,3500),
-     ($6,$2,$3,$7,$5,'INV-01002','lab','paid',1800,0,0,1800,0),
-     ($8,$2,$9,$10,$11,'INV-01003','consultation','partial',4000,500,0,3500,1500)`,
+     ($1,$2,$3,$4,$5,'INV-01001','consultation','open',35,0,0,35,35),
+     ($6,$2,$3,$7,$5,'INV-01002','lab','paid',18,0,0,18,0),
+     ($8,$2,$9,$10,$11,'INV-01003','consultation','partial',40,5,0,35,15)`,
     [invoiceOpen, northwind, harbor, patientIds['Maya Rahman'], hassan, invoicePaid, patientIds['Fatima Noor'], invoicePartial, ridge, patientIds['Sofia Alvarez'], ada]
   );
   await client.query(
     `INSERT INTO invoice_lines (organization_id, invoice_id, description, quantity, unit_price, amount) VALUES
-     ($1,$2,'General consultation',1,3500,3500),
-     ($1,$3,'Complete blood count',1,1800,1800),
-     ($1,$4,'Pediatric consultation',1,4000,4000)`,
+     ($1,$2,'General consultation',1,35,35),
+     ($1,$3,'Complete blood count',1,18,18),
+     ($1,$4,'Pediatric consultation',1,40,40)`,
     [northwind, invoiceOpen, invoicePaid, invoicePartial]
   );
   await client.query(
     `INSERT INTO payments (organization_id, invoice_id, amount, method, kind, received_by) VALUES
-     ($1,$2,1800,'card','payment',$3),
-     ($1,$4,2000,'cash','payment',$3)`,
+     ($1,$2,18,'card','payment',$3),
+     ($1,$4,20,'cash','payment',$3)`,
     [northwind, invoicePaid, users['omar@northwind.local'], invoicePartial]
   );
 
@@ -528,8 +528,8 @@ async function seedDemo(client, passwordHash) {
   );
   await client.query(
     `INSERT INTO claims (organization_id, patient_id, policy_id, invoice_id, amount, status, submitted_on, notes) VALUES
-     ($1,$2,$3,$4,2800,'submitted', CURRENT_DATE, 'Consultation claim'),
-     ($1,$5,$3,NULL,1800,'rejected', CURRENT_DATE - 5, 'Member number did not match the plan year.')`,
+     ($1,$2,$3,$4,28,'submitted', CURRENT_DATE, 'Consultation claim'),
+     ($1,$5,$3,NULL,18,'rejected', CURRENT_DATE - 5, 'Member number did not match the plan year.')`,
     [northwind, patientIds['Maya Rahman'], policy, invoiceOpen, patientIds['Arjun Mehta']]
   );
 

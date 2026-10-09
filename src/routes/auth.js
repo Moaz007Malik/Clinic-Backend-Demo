@@ -101,7 +101,7 @@ router.post('/auth/onboard', loginLimit, asyncRoute(async (req, res) => {
         body.address || null,
         body.city || null,
         body.country || null,
-        body.timezone || 'Asia/Karachi'
+        body.timezone || 'Asia/Muscat'
       ]
     );
     const organization = org.rows[0];

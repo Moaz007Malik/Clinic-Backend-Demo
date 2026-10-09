@@ -15,7 +15,7 @@ router.get('/', requirePermission('appointments.read'), asyncRoute(async (req, r
   let dateSql = '';
   if (req.query.date) {
     params.push(req.query.date);
-    dateSql = ` AND (a.starts_at AT TIME ZONE 'Asia/Karachi')::date = $${params.length}::date`;
+    dateSql = ` AND (a.starts_at AT TIME ZONE 'Asia/Muscat')::date = $${params.length}::date`;
   }
   if (req.query.doctorId) {
     params.push(req.query.doctorId);
@@ -54,7 +54,7 @@ router.get('/queue', requirePermission('appointments.read'), asyncRoute(async (r
      JOIN patients p ON p.id = a.patient_id
      LEFT JOIN users u ON u.id = a.doctor_id
      WHERE a.organization_id = $1
-       AND (a.starts_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date
+       AND (a.starts_at AT TIME ZONE 'Asia/Muscat')::date = (now() AT TIME ZONE 'Asia/Muscat')::date
        AND a.status IN ('checked_in', 'in_consult', 'confirmed', 'scheduled')
        ${clinic}
      ORDER BY a.token_number NULLS LAST, a.starts_at`,
@@ -136,7 +136,7 @@ router.post('/', requirePermission('appointments.write'), asyncRoute(async (req,
         const token = await client.query(
           `SELECT COALESCE(MAX(token_number), 0) + 1 AS n FROM appointments
            WHERE organization_id = $1 AND clinic_id = $2
-             AND (starts_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date`,
+             AND (starts_at AT TIME ZONE 'Asia/Muscat')::date = (now() AT TIME ZONE 'Asia/Muscat')::date`,
           [org, clinicId]
         );
         const updated = await client.query(
@@ -153,7 +153,7 @@ router.post('/', requirePermission('appointments.write'), asyncRoute(async (req,
       userId: patient.rows[0].portal_user_id,
       patientId: body.patientId,
       title: 'Appointment booked',
-      body: `${patient.rows[0].first_name} has an appointment on ${new Date(body.startsAt).toLocaleString('en-PK', { timeZone: 'Asia/Karachi' })}.`,
+      body: `${patient.rows[0].first_name} has an appointment on ${new Date(body.startsAt).toLocaleString('en-OM', { timeZone: 'Asia/Muscat' })}.`,
       triggerKey: 'appointment.booked',
       channels: ['in_app', 'email', 'sms', 'whatsapp']
     });
@@ -195,7 +195,7 @@ router.patch('/:id', requirePermission('appointments.write'), asyncRoute(async (
       const next = await client.query(
         `SELECT COALESCE(MAX(token_number), 0) + 1 AS n FROM appointments
          WHERE organization_id = $1 AND clinic_id = $2
-           AND (starts_at AT TIME ZONE 'Asia/Karachi')::date = (now() AT TIME ZONE 'Asia/Karachi')::date`,
+           AND (starts_at AT TIME ZONE 'Asia/Muscat')::date = (now() AT TIME ZONE 'Asia/Muscat')::date`,
         [org, appointment.clinic_id]
       );
       token = next.rows[0].n;

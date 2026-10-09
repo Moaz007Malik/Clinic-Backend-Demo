@@ -28,13 +28,13 @@ export function slugify(value) {
     .slice(0, 40);
 }
 
-export function karachiStamp(hour, minute = 0, dayOffset = 0) {
+export function muscatStamp(hour, minute = 0, dayOffset = 0) {
   const now = new Date(Date.now() + dayOffset * 86400000);
   const date = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Karachi',
+    timeZone: 'Asia/Muscat',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
   }).format(now);
-  return `${date}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+05:00`;
+  return `${date}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+04:00`;
 }
